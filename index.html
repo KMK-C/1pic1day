@@ -102,6 +102,7 @@ ol li{margin:4px 0}
     <button class="side-btn" id="autoBtn"><span class="ic">A</span><span>自动拍</span></button>
   </div>
   <div class="muted" id="status" style="text-align:center"></div>
+  <div class="muted" id="camInfo" style="text-align:center;font-size:11.5px"></div>
 </div>
 
 <div id="sheet">
@@ -163,15 +164,19 @@ const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSIO
 const MODEL_REMOTE = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 const DEFAULT_SHAPE = { top: -1.15, chin: 1.85, rx: 1.15, nose: 0.72, noseX: 0, mouth: 1.15 };
 // Default framing before the first photo: eyes at 40% height; face size picked by the user.
-// ipd = inter-pupil distance as a fraction of the frame width (smaller = more of the room in the picture).
+// ipd916 = inter-pupil distance as a fraction of the 9:16 export width, so the result in the Douyin video is the
+// same whether the camera hands the page a portrait or a landscape frame. Face width is about 2.3 x ipd.
 const FRAMINGS = {
-  close:  { ipd: 0.15,  label: '近景', note: '脸为主，手臂稍微弯着拿' },
-  medium: { ipd: 0.11,  label: '中景', note: '带一些环境，手臂伸直拿' },
-  wide:   { ipd: 0.085, label: '远景', note: '更多环境，要用支架放远一点' },
+  close:  { ipd916: 0.20,  label: '近景', face: '46%', note: '脸为主' },
+  medium: { ipd916: 0.15,  label: '中景', face: '34%', note: '带一些环境' },
+  wide:   { ipd916: 0.115, label: '远景', face: '26%', note: '更多环境，一般要用支架' },
 };
+function crop916Width(W, H) { return Math.min(W, H * 9 / 16); }
 function defaultRef() {
   const f = FRAMINGS[opt('framing', 'medium')] || FRAMINGS.medium;
-  return { eyes: [[0.5 - f.ipd / 2, 0.40], [0.5 + f.ipd / 2, 0.40]], shape: DEFAULT_SHAPE, isDefault: true };
+  const W = S.vw || 1440, H = S.vh || 1920;
+  const half = f.ipd916 * crop916Width(W, H) / W / 2;
+  return { eyes: [[0.5 - half, 0.40], [0.5 + half, 0.40]], shape: DEFAULT_SHAPE, isDefault: true };
 }
 const TOL = { pos: 0.10, scale: 0.05, roll: 2.5, yaw: 0.06, pitch: 0.07 };
 const LEVEL_TOL = { pitch: 3, roll: 2 };
@@ -259,7 +264,16 @@ async function startCamera() {
     }
   } catch (_) {}
   S.vw = video.videoWidth; S.vh = video.videoHeight;
-  layoutStage();
+  video.onresize = () => { if (video.videoWidth && (video.videoWidth !== S.vw || video.videoHeight !== S.vh)) { S.vw = video.videoWidth; S.vh = video.videoHeight; layoutStage(); renderAll(); } };
+  layoutStage(); renderAll();
+}
+function camInfo() {
+  if (!S.vw) return '';
+  const landscape = S.vw > S.vh, portraitUI = window.innerHeight > window.innerWidth;
+  let t = `摄像头画面 ${S.vw}×${S.vh}（${landscape ? '横' : '竖'}）`;
+  try { const z = S.track.getSettings().zoom, c = S.track.getCapabilities ? S.track.getCapabilities().zoom : null; if (c) t += ` · 缩放 ${z ?? '-'}（${c.min}–${c.max}）`; } catch (_) {}
+  if (landscape && portraitUI) t += ' · 手机竖着但画面是横的：9:16 只能用中间一条，脸会显得大';
+  return t;
 }
 function camError(e) {
   const m = $('#camMsg'); m.style.display = 'flex';
@@ -595,7 +609,8 @@ function renderAll() {
   document.querySelectorAll('#framingSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === opt('framing', 'medium')));
   $('#status').textContent = S.history.length
     ? `这台手机已拍 ${S.history.length} 天 · 连续 ${streak} 天${set_.has(t) ? ' · 今天已拍 ✓' : ''}`
-    : `${fr.label}，${fr.note}。第一张会成为以后每天的基准，找一个每天都能复现的位置。`;
+    : `${fr.label}，${fr.note}，导出 9:16 后脸宽约占 ${fr.face}。第一张会成为以后每天的基准。`;
+  $('#camInfo').textContent = camInfo();
   $('#shutter').classList.toggle('retake', set_.has(t));
   const mode = opt('ghost', 'prev');
   document.querySelectorAll('#ghostSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
