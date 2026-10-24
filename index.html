@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="1Pic1Day">
+<meta name="theme-color" content="#0e0e10">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>1Pic1Day</title>
+<style>
+:root{
+  --bg:#0e0e10; --panel:#17171b; --line:#2a2a31; --text:#ececf0; --muted:#8b8b95;
+  --accent:#ffb547; --ok:#4ade80; --bad:#ff6b6b;
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overscroll-behavior:none}
+body{display:flex;flex-direction:column;min-height:100dvh;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+button,select,input{font:inherit;color:inherit}
+#top{display:flex;align-items:center;gap:10px;padding:10px 16px;font-size:14px}
+#top .brand{font-weight:700}
+#top .brand b{color:var(--accent)}
+#dateInfo{color:var(--muted);flex:1}
+.icon-btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px 10px;font-size:13px}
+#stage{position:relative;width:100%;background:#000;overflow:hidden;touch-action:manipulation}
+#stage video,#stage img,#stage canvas{position:absolute;inset:0;width:100%;height:100%}
+#stage video{object-fit:cover}
+#ghost{object-fit:fill;pointer-events:none;display:none}
+#overlay{pointer-events:none}
+#countdown{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:120px;font-weight:200;text-shadow:0 4px 30px rgba(0,0,0,.6);pointer-events:none}
+#lookHere{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);padding:5px 12px;border-radius:999px;font-size:14px;display:none}
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+#pill{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(10,10,12,.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:7px 13px;border-radius:999px;font-size:13.5px;white-space:nowrap;display:flex;gap:8px;align-items:center;max-width:94%}
+#pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+#pillText{overflow:hidden;text-overflow:ellipsis}
+#camMsg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;line-height:1.7;color:var(--muted);background:#000;font-size:14px}
+#controls{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:12px 16px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px}
+.seg{display:flex;background:var(--panel);border-radius:9px;padding:2px;border:1px solid var(--line)}
+.seg button{border:0;background:transparent;padding:5px 11px;border-radius:7px;font-size:13px;color:var(--muted)}
+.seg button.on{background:#2a2a31;color:var(--text)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+#shootRow{display:flex;align-items:center;justify-content:space-around}
+#shutter{width:76px;height:76px;border-radius:50%;border:4px solid var(--text);background:transparent;padding:5px}
+#shutter span{display:block;width:100%;height:100%;border-radius:50%;background:var(--text);transition:transform .1s}
+#shutter:active span{transform:scale(.9)}
+#shutter.retake{border-color:var(--muted)}
+#shutter.retake span{background:var(--muted)}
+.side-btn{width:64px;text-align:center;font-size:12px;color:var(--muted);background:transparent;border:0;display:flex;flex-direction:column;align-items:center;gap:4px}
+.side-btn .ic{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--text)}
+.side-btn.on .ic{border-color:var(--accent);color:var(--accent)}
+.muted{color:var(--muted);font-size:12.5px;line-height:1.6}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.82);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;z-index:20}
+#sheet img{max-width:100%;max-height:58vh;border-radius:12px}
+.btn{padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);font-size:15px;width:100%;max-width:360px}
+.btn.primary{background:var(--accent);color:#1a1205;border-color:var(--accent);font-weight:650}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#222228;border:1px solid var(--line);padding:9px 14px;border-radius:12px;font-size:13.5px;opacity:0;transition:opacity .25s;z-index:30;max-width:92vw;text-align:center}
+#toast.show{opacity:1}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:0;width:min(94vw,460px)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.dlg-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.dlg-head h2{margin:0;font-size:16px}
+.dlg-body{padding:12px 16px 16px;max-height:75vh;overflow-y:auto}
+.x{border:0;background:transparent;font-size:22px;color:var(--muted)}
+select{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+ol{padding-left:20px;margin:6px 0}
+ol li{margin:4px 0}
+</style>
+</head>
+<body>
+<div id="top">
+  <div class="brand">1Pic<b>1</b>Day</div>
+  <div id="dateInfo"></div>
+  <button class="icon-btn" id="helpBtn">说明</button>
+  <button class="icon-btn" id="settingsBtn">设置</button>
+</div>
+
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <img id="ghost" alt="">
+  <canvas id="overlay"></canvas>
+  <div id="lookHere">看镜头 ↑</div>
+  <div id="countdown"></div>
+  <div id="flash"></div>
+  <div id="pill"><span class="dot"></span><span id="pillText">正在打开摄像头…</span></div>
+  <div id="camMsg"></div>
+</div>
+
+<div id="controls">
+  <div class="row" id="framingRow" style="display:none"><span>第一张取景</span>
+    <div class="seg" id="framingSeg"><button data-v="close">近景</button><button data-v="medium">中景</button><button data-v="wide">远景</button></div>
+  </div>
+  <div class="row"><span>残影</span>
+    <div class="seg" id="ghostSeg"><button data-v="prev">上一张</button><button data-v="first">第一张</button><button data-v="off">关</button></div>
+  </div>
+  <input type="range" id="ghostOpacity" min="0" max="0.7" step="0.05">
+  <div id="shootRow">
+    <button class="side-btn" id="levelBtn"><span class="ic">◎</span><span>水平仪</span></button>
+    <button id="shutter" aria-label="拍照"><span></span></button>
+    <button class="side-btn" id="autoBtn"><span class="ic">A</span><span>自动拍</span></button>
+  </div>
+  <div class="muted" id="status" style="text-align:center"></div>
+</div>
+
+<div id="sheet">
+  <img id="sheetImg" alt="">
+  <div id="sheetName" class="muted"></div>
+  <button class="btn primary" id="saveBtn">保存到 1Pic1Day 文件夹</button>
+  <button class="btn" id="shareBtn">分享 / 存到其他位置</button>
+  <button class="btn" id="discardBtn">不要这张，重拍</button>
+  <div class="muted" style="max-width:360px;text-align:center">“保存”会下载这张照片。在 Safari 下载设置里把位置设成 iCloud 云盘 › 桌面 › 1Pic1Day › photos，以后点一下就直接进文件夹。详见“说明”。</div>
+</div>
+
+<div id="toast"></div>
+
+<dialog id="settingsDlg">
+  <div class="dlg-head"><h2>设置</h2><button class="x" data-close>×</button></div>
+  <div class="dlg-body">
+    <div class="row"><label><input type="checkbox" id="guideChk"> 五官虚线引导</label></div>
+    <div class="row" style="margin-top:8px"><label><input type="checkbox" id="cropChk"> 显示抖音 9:16 裁切范围</label></div>
+    <div class="row" style="margin-top:8px"><label><input type="checkbox" id="mirrorChk"> 镜像（像照镜子一样）</label></div>
+    <div class="muted" id="mirrorNote"></div>
+    <div class="row" style="margin-top:8px"><span>倒计时</span><select id="cdSel"><option value="0">不倒计时</option><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
+    <div class="row" style="margin-top:8px"><label><input type="checkbox" id="soundChk"> 倒计时提示音</label></div>
+    <div class="row" style="margin-top:8px"><span>新的一天从几点开始</span><select id="dayStartSel"></select></div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+    <div class="muted" id="refInfo"></div>
+    <div style="display:grid;gap:8px;margin-top:10px">
+      <label class="btn" style="text-align:center">从文件选一张旧照片做残影和基准<input type="file" id="importInput" accept="image/*" hidden></label>
+      <button class="btn" id="refReset">恢复默认引导线</button>
+    </div>
+    <div class="muted" style="margin-top:10px">残影、基准和拍摄记录只保存在这台手机的 Safari 里，不上传任何地方。如果被清掉了，用上面的按钮选一张旧照片就能恢复。</div>
+  </div>
+</dialog>
+
+<dialog id="helpDlg">
+  <div class="dlg-head"><h2>说明</h2><button class="x" data-close>×</button></div>
+  <div class="dlg-body muted" style="font-size:13.5px">
+    <b style="color:var(--text)">第一次使用（只需一次）</b>
+    <ol>
+      <li>iPhone 设置 › App › Safari › 下载 › 选“其他…” › iCloud 云盘 › 桌面 › 1Pic1Day › photos</li>
+      <li>在 Safari 里点分享按钮 › “添加到主屏幕”，以后从主屏幕打开</li>
+      <li>第一次拍照会请求摄像头权限；点“水平仪”会请求“运动与方向”权限，都选允许</li>
+    </ol>
+    <b style="color:var(--text)">每天拍</b>
+    <ol>
+      <li>手机竖直拿在眼睛高度，水平仪变绿</li>
+      <li>两只眼睛对准两个小圆，脸放进椭圆，全部变绿</li>
+      <li>按快门，倒计时期间看镜头（屏幕上方）</li>
+      <li>点“保存到 1Pic1Day 文件夹” › 下载</li>
+    </ol>
+    <p>照片按日期命名（2026-10-25.jpg），Mac 上的 1Pic1Day 会自动识别、按眼睛对齐、导出抖音 9:16 视频。同一天重拍再保存一次就行，Mac 端会保留最新的那张。</p>
+    <p>想让视频更稳：每天同一时间、同一个地方、脸朝着光（窗户或灯），手机和脸的距离靠引导线保持一致。能用支架就用支架。</p>
+  </div>
+</dialog>
+
+<script type="module">
+const MP_VERSION = '0.10.35';
+const VENDOR = './vendor';
+const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+const MODEL_REMOTE = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const DEFAULT_SHAPE = { top: -1.15, chin: 1.85, rx: 1.15, nose: 0.72, noseX: 0, mouth: 1.15 };
+// Default framing before the first photo: eyes at 40% height; face size picked by the user.
+// ipd = inter-pupil distance as a fraction of the frame width (smaller = more of the room in the picture).
+const FRAMINGS = {
+  close:  { ipd: 0.15,  label: '近景', note: '脸为主，手臂稍微弯着拿' },
+  medium: { ipd: 0.11,  label: '中景', note: '带一些环境，手臂伸直拿' },
+  wide:   { ipd: 0.085, label: '远景', note: '更多环境，要用支架放远一点' },
+};
+function defaultRef() {
+  const f = FRAMINGS[opt('framing', 'medium')] || FRAMINGS.medium;
+  return { eyes: [[0.5 - f.ipd / 2, 0.40], [0.5 + f.ipd / 2, 0.40]], shape: DEFAULT_SHAPE, isDefault: true };
+}
+const TOL = { pos: 0.10, scale: 0.05, roll: 2.5, yaw: 0.06, pitch: 0.07 };
+const LEVEL_TOL = { pitch: 3, roll: 2 };
+const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'];
+
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const dayDiff = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
+const canvasToBlob = (c, q = 0.93) => new Promise(r => c.toBlob(r, 'image/jpeg', q));
+let toastTimer;
+function toast(t, ms = 3000) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), ms); }
+
+// ------------------------------------------------------------------ local storage (this phone only)
+const store = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('1pic1day', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction('kv', mode); const req = fn(t.objectStore('kv')); t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error); }); };
+  return {
+    get: k => tx('readonly', s => s.get(k)).catch(() => undefined),
+    set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(e => console.warn('store', e)),
+  };
+})();
+
+const S = {
+  settings: {}, history: [], ghostPrev: null, ghostFirst: null,
+  stream: null, track: null, vw: 0, vh: 0,
+  landmarker: null, imageLandmarker: null, vision: null, lmStatus: 'loading',
+  face: null, lastDetect: 0, lastTs: 0, alignedSince: 0, countdown: null, busy: false,
+  level: null, levelOn: false, pending: null,
+};
+const video = $('#video'), overlay = $('#overlay'), octx = overlay.getContext('2d'), ghost = $('#ghost');
+const opt = (k, d) => (S.settings[k] === undefined ? d : S.settings[k]);
+const set = (k, v) => { S.settings[k] = v; store.set('settings', S.settings); };
+const mirror = () => opt('mirror', true);
+const today = () => ymd(new Date(Date.now() - opt('dayStartHour', 4) * 3600e3));
+function reference() {
+  const r = S.settings.reference;
+  if (r && r.eyes) {
+    const W = r.w || 3, H = r.h || 4;
+    const L = [r.eyes[0][0] * W, r.eyes[0][1] * H], R = [r.eyes[1][0] * W, r.eyes[1][1] * H];
+    const M = mid(L, R), d = dist(L, R);
+    return { ...r, eyes: [[(M[0] - d / 2) / W, M[1] / H], [(M[0] + d / 2) / W, M[1] / H]], shape: { ...DEFAULT_SHAPE, ...(r.shape || {}) } };
+  }
+  return defaultRef();
+}
+
+// ------------------------------------------------------------------ boot
+async function boot() {
+  S.settings = (await store.get('settings')) || {};
+  S.history = (await store.get('history')) || [];
+  S.ghostPrev = (await store.get('ghostPrev')) || null;
+  S.ghostFirst = (await store.get('ghostFirst')) || null;
+  bindUI(); renderAll();
+  await startCamera();
+  loadLandmarker();
+  if (opt('levelOn', false)) enableLevel(false);
+  requestAnimationFrame(loop);
+}
+
+async function startCamera() {
+  if (S.stream) S.stream.getTracks().forEach(t => t.stop());
+  try {
+    S.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
+      facingMode: 'user', width: { ideal: 1440 }, height: { ideal: 1920 }, aspectRatio: { ideal: 0.75 }, frameRate: { ideal: 30 } } });
+  } catch (e) { return camError(e); }
+  S.track = S.stream.getVideoTracks()[0];
+  video.srcObject = S.stream;
+  await new Promise(r => { if (video.readyState >= 1) r(); else video.onloadedmetadata = () => r(); });
+  try { await video.play(); } catch (_) {}
+  // Use the widest field of view the camera offers (more of the room), if the browser exposes zoom.
+  try {
+    const caps = S.track.getCapabilities ? S.track.getCapabilities() : {};
+    const cur = S.track.getSettings().zoom;
+    if (caps.zoom && typeof caps.zoom.min === 'number' && (cur === undefined || caps.zoom.min < cur)) {
+      await S.track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
+    }
+  } catch (_) {}
+  S.vw = video.videoWidth; S.vh = video.videoHeight;
+  layoutStage();
+}
+function camError(e) {
+  const m = $('#camMsg'); m.style.display = 'flex';
+  let msg = '打不开摄像头：' + (e && e.message || e);
+  if (e && e.name === 'NotAllowedError') msg = '摄像头权限被拒绝。<br>点地址栏左边的“大小”图标 › 网站设置 › 相机 › 允许，然后刷新。';
+  if (!window.isSecureContext) msg = '这个页面需要通过 https 打开才能用摄像头。';
+  m.innerHTML = msg; setPill('bad', '摄像头不可用');
+}
+function layoutStage() {
+  const stage = $('#stage');
+  const ar = S.vw && S.vh ? S.vw / S.vh : 0.75;
+  const maxH = window.innerHeight * 0.68;
+  let w = document.body.clientWidth, h = w / ar;
+  if (h > maxH) { h = maxH; w = h * ar; }
+  stage.style.width = Math.round(w) + 'px'; stage.style.height = Math.round(h) + 'px'; stage.style.margin = '0 auto';
+  const dpr = window.devicePixelRatio || 1;
+  overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr);
+  video.style.transform = mirror() ? 'scaleX(-1)' : 'none';
+}
+window.addEventListener('resize', layoutStage);
+window.addEventListener('orientationchange', () => setTimeout(layoutStage, 300));
+
+// ------------------------------------------------------------------ face landmarks
+async function importVision() {
+  if (S.vision) return S.vision;
+  let mod, wasm;
+  try { mod = await import(`${VENDOR}/vision_bundle.mjs`); wasm = `${VENDOR}/wasm`; }
+  catch (e) { mod = await import(`${MP_CDN}/vision_bundle.mjs`); wasm = `${MP_CDN}/wasm`; }
+  S.vision = { mod, wasm }; return S.vision;
+}
+async function createLandmarker(mode) {
+  const { mod, wasm } = await importVision();
+  const fileset = await mod.FilesetResolver.forVisionTasks(wasm);
+  let lastErr;
+  for (const model of [`${VENDOR}/face_landmarker.task`, MODEL_REMOTE]) {
+    for (const delegate of ['GPU', 'CPU']) {
+      try {
+        return await mod.FaceLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: model, delegate }, runningMode: mode, numFaces: 1 });
+      } catch (e) { lastErr = e; }
+    }
+  }
+  throw lastErr;
+}
+async function loadLandmarker() {
+  try { S.landmarker = await createLandmarker('VIDEO'); S.lmStatus = 'ready'; }
+  catch (e) { console.error(e); S.lmStatus = 'failed'; }
+}
+function getImageLandmarker() { if (!S.imageLandmarker) S.imageLandmarker = createLandmarker('IMAGE'); return S.imageLandmarker; }
+
+function faceFromLandmarks(lm, W, H, flip) {
+  if (!lm || lm.length < 468) return null;
+  const P = i => [flip ? 1 - lm[i].x : lm[i].x, lm[i].y];
+  let a, b;
+  if (lm.length >= 478) { a = P(468); b = P(473); } else { a = mid(P(33), P(133)); b = mid(P(362), P(263)); }
+  const eyes = a[0] <= b[0] ? [a, b] : [b, a];
+  const px = p => [p[0] * W, p[1] * H];
+  const L = px(eyes[0]), R = px(eyes[1]);
+  const d = dist(L, R), ang = Math.atan2(R[1] - L[1], R[0] - L[0]), M = mid(L, R);
+  const cos = Math.cos(-ang), sin = Math.sin(-ang);
+  const F = p => { const q = px(p), x = q[0] - M[0], y = q[1] - M[1]; return [(x * cos - y * sin) / d, (x * sin + y * cos) / d]; };
+  const r4 = v => Math.round(v * 10000) / 10000;
+  const shape = { top: F(P(10))[1], chin: F(P(152))[1], nose: F(P(1))[1], noseX: F(P(1))[0], mouth: F(mid(P(13), P(14)))[1], rx: Math.abs(F(P(454))[0] - F(P(234))[0]) / 2 };
+  return { eyes: eyes.map(e => e.map(r4)), nose: P(1).map(r4), shape: Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, r4(v)])) };
+}
+function detectLive(now) {
+  if (!S.landmarker || video.readyState < 2 || now - S.lastDetect < 90) return;
+  S.lastDetect = now;
+  let ts = performance.now(); if (ts <= S.lastTs) ts = S.lastTs + 1; S.lastTs = ts;
+  let res; try { res = S.landmarker.detectForVideo(video, ts); } catch (e) { return; }
+  const lm = res && res.faceLandmarks && res.faceLandmarks[0];
+  const f = lm ? faceFromLandmarks(lm, S.vw, S.vh, mirror()) : null;
+  if (!f) { S.face = null; return; }
+  if (S.face && now - S.face.t < 300) {
+    const sm = (a, b) => a.map((v, i) => v * 0.5 + b[i] * 0.5);
+    f.eyes = [sm(f.eyes[0], S.face.eyes[0]), sm(f.eyes[1], S.face.eyes[1])];
+  }
+  f.t = now; S.face = f;
+}
+function evaluate(face, ref, W, H) {
+  const px = p => [p[0] * W, p[1] * H];
+  const Lr = px(ref.eyes[0]), Rr = px(ref.eyes[1]), L = px(face.eyes[0]), R = px(face.eyes[1]);
+  const dRef = dist(Lr, Rr), d = dist(L, R), Mr = mid(Lr, Rr), M = mid(L, R);
+  const offN = Math.hypot(M[0] - Mr[0], M[1] - Mr[1]) / dRef, scale = d / dRef;
+  const roll = (Math.atan2(R[1] - L[1], R[0] - L[0])) * 180 / Math.PI;
+  const yaw = face.shape.noseX - (ref.isDefault ? 0 : ref.shape.noseX);
+  const pitch = ref.isDefault ? 0 : face.shape.nose - ref.shape.nose;
+  const c = { scale: Math.abs(scale - 1) < TOL.scale, pos: offN < TOL.pos, roll: Math.abs(roll) < TOL.roll, yaw: Math.abs(yaw) < TOL.yaw, pitch: Math.abs(pitch) < TOL.pitch };
+  const hints = [];
+  if (!c.scale) hints.push(scale < 1 ? '靠近一点' : '远一点');
+  if (!c.pos) hints.push('按箭头移动');
+  if (!c.roll) hints.push('头摆正');
+  if (!c.yaw) hints.push('脸转正');
+  if (!c.pitch) hints.push(pitch > 0 ? '抬一点下巴' : '收一点下巴');
+  return { ok: !hints.length, hints, c, M, Mr, L, R };
+}
+
+// ------------------------------------------------------------------ level (gravity from the accelerometer)
+function onMotion(e) {
+  const g = e.accelerationIncludingGravity; if (!g || g.y == null) return;
+  const s = g.y >= 0 ? 1 : -1; // normalise platform sign conventions: phone upright => y > 0
+  const x = g.x * s, y = g.y * s, z = g.z * s;
+  const roll = Math.atan2(x, y) * 180 / Math.PI;     // screen rotated like a steering wheel
+  const pitch = Math.atan2(z, y) * 180 / Math.PI;    // > 0: screen faces up (shooting from below)
+  const k = 0.25, L = S.level;
+  S.level = L ? { roll: L.roll + (roll - L.roll) * k, pitch: L.pitch + (pitch - L.pitch) * k, t: performance.now() } : { roll, pitch, t: performance.now() };
+}
+async function enableLevel(fromTap) {
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      if (!fromTap) { $('#levelBtn').classList.remove('on'); return; } // iOS needs a tap every session
+      const r = await DeviceMotionEvent.requestPermission();
+      if (r !== 'granted') { toast('没有拿到“运动与方向”权限，水平仪不可用'); return; }
+    }
+    window.addEventListener('devicemotion', onMotion);
+    S.levelOn = true; set('levelOn', true); $('#levelBtn').classList.add('on');
+    setTimeout(() => { if (!S.level) toast('这台设备没有陀螺仪数据，水平仪不可用'); }, 1500);
+  } catch (e) { toast('水平仪不可用：' + e.message); }
+}
+function disableLevel() { window.removeEventListener('devicemotion', onMotion); S.levelOn = false; S.level = null; set('levelOn', false); $('#levelBtn').classList.remove('on'); }
+function levelState() {
+  if (!S.levelOn || !S.level || performance.now() - S.level.t > 1000) return null;
+  const { roll, pitch } = S.level;
+  const ok = Math.abs(pitch) < LEVEL_TOL.pitch && Math.abs(roll) < LEVEL_TOL.roll;
+  const hints = [];
+  if (Math.abs(pitch) >= LEVEL_TOL.pitch) hints.push(pitch > 0 ? '手机在仰拍，上端朝自己压一点' : '手机在俯拍，上端往后仰一点');
+  if (Math.abs(roll) >= LEVEL_TOL.roll) hints.push('手机左右放平');
+  return { ok, roll, pitch, hints };
+}
+
+// ------------------------------------------------------------------ drawing
+function setPill(kind, text) {
+  const c = { ok: 'var(--ok)', warn: 'var(--accent)', bad: 'var(--bad)' }[kind] || 'var(--muted)';
+  $('#pill .dot').style.background = c; $('#pillText').textContent = text;
+}
+function framing916(ref, W, H) {
+  const L = [ref.eyes[0][0] * W, ref.eyes[0][1] * H], R = [ref.eyes[1][0] * W, ref.eyes[1][1] * H];
+  const [cx, cy] = mid(L, R);
+  const ty = clamp(cy / H, 0.36, 0.48), Wo = 1080, Ho = 1920, Xo = Wo / 2, Yo = ty * Ho;
+  const s = Math.max(Xo / cx, (Wo - Xo) / (W - cx), Yo / cy, (Ho - Yo) / (H - cy)) * opt('exportZoom', 1.05);
+  return { x: cx - Xo / s, y: cy - Yo / s, w: Wo / s, h: Ho / s };
+}
+function drawGuide(ctx, ref, W, H, color, dpr) {
+  const L = [ref.eyes[0][0] * W, ref.eyes[0][1] * H], R = [ref.eyes[1][0] * W, ref.eyes[1][1] * H];
+  const d = dist(L, R), M = mid(L, R), sh = ref.shape;
+  ctx.save(); ctx.translate(M[0], M[1]);
+  ctx.lineWidth = 2 * dpr; ctx.strokeStyle = color; ctx.setLineDash([8 * dpr, 6 * dpr]);
+  ctx.beginPath(); ctx.ellipse(0, (sh.top + sh.chin) / 2 * d, sh.rx * d, (sh.chin - sh.top) / 2 * d, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 0.45; ctx.lineWidth = 1.2 * dpr;
+  ctx.beginPath(); ctx.moveTo(-W, 0); ctx.lineTo(W, 0); ctx.moveTo(0, -H); ctx.lineTo(0, H); ctx.stroke();
+  ctx.globalAlpha = 1; ctx.lineWidth = 2 * dpr;
+  ctx.beginPath(); ctx.moveTo(-0.38 * d, sh.mouth * d); ctx.lineTo(0.38 * d, sh.mouth * d); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(-0.12 * d, sh.nose * d); ctx.lineTo(0.12 * d, sh.nose * d); ctx.stroke();
+  for (const sx of [-0.5, 0.5]) {
+    ctx.beginPath(); ctx.arc(sx * d, 0, 0.13 * d, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx * d - 0.05 * d, 0); ctx.lineTo(sx * d + 0.05 * d, 0); ctx.moveTo(sx * d, -0.05 * d); ctx.lineTo(sx * d, 0.05 * d); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawLevel(ctx, lv, W, H, dpr) {
+  const r = 30 * dpr, cx = 14 * dpr + r, cy = 14 * dpr + r;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  const col = lv.ok ? '#4ade80' : '#ffb547';
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1 * dpr;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.28, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
+  // dot: x floats to the high side like a bubble, y shows where the camera points (up = shooting from below)
+  const k = r / 15;
+  const bx = cx + clamp(lv.roll * k, -r * 0.8, r * 0.8), by = cy + clamp(-lv.pitch * k, -r * 0.8, r * 0.8);
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(bx, by, 7 * dpr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = `${10 * dpr}px -apple-system, sans-serif`; ctx.textAlign = 'center';
+  const fmt = v => { const n = Math.round(v) || 0; return (n > 0 ? '+' : '') + n + '°'; };
+  ctx.fillText(`仰俯 ${fmt(lv.pitch)}  左右 ${fmt(lv.roll)}`, cx + 8 * dpr, cy + r + 13 * dpr);
+  // horizon line across the frame
+  ctx.strokeStyle = col; ctx.globalAlpha = 0.55; ctx.lineWidth = 1.5 * dpr;
+  const a = lv.roll * Math.PI / 180, len = W * 0.18; // true horizon as seen on the tilted screen
+  ctx.beginPath(); ctx.moveTo(W - 14 * dpr - len, H * 0.08 - Math.tan(a) * len / 2); ctx.lineTo(W - 14 * dpr, H * 0.08 + Math.tan(a) * len / 2); ctx.stroke();
+  ctx.restore();
+}
+function drawArrow(ctx, from, to, color, dpr) {
+  const len = dist(from, to); if (len < 6 * dpr) return;
+  const ang = Math.atan2(to[1] - from[1], to[0] - from[0]), h = Math.min(14 * dpr, len * 0.5);
+  ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3 * dpr;
+  ctx.beginPath(); ctx.moveTo(from[0], from[1]); ctx.lineTo(to[0], to[1]); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(to[0], to[1]); ctx.lineTo(to[0] - h * Math.cos(ang - 0.45), to[1] - h * Math.sin(ang - 0.45)); ctx.lineTo(to[0] - h * Math.cos(ang + 0.45), to[1] - h * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+let lastEval = null;
+function draw(now) {
+  const W = overlay.width, H = overlay.height, dpr = window.devicePixelRatio || 1;
+  octx.clearRect(0, 0, W, H);
+  if (!S.vw) return;
+  const ref = reference();
+  const face = S.face && now - S.face.t < 500 ? S.face : null;
+  const ev = face ? evaluate(face, ref, W, H) : null; lastEval = ev;
+  const lv = levelState();
+  if (opt('cropFrames', true)) {
+    const b = framing916(ref, W, H);
+    octx.fillStyle = 'rgba(0,0,0,0.38)';
+    octx.fillRect(0, 0, Math.max(0, b.x), H); octx.fillRect(b.x + b.w, 0, W - b.x - b.w, H);
+    if (b.y > 0) octx.fillRect(b.x, 0, b.w, b.y);
+    if (b.y + b.h < H) octx.fillRect(b.x, b.y + b.h, b.w, H - b.y - b.h);
+    octx.save(); octx.fillStyle = 'rgba(255,255,255,0.7)'; octx.font = `${10 * dpr}px -apple-system, sans-serif`; octx.textAlign = 'right';
+    octx.fillText('抖音 9:16 范围', b.x + b.w - 6 * dpr, Math.max(b.y, 0) + 14 * dpr); octx.restore();
+  }
+  const color = ev ? (ev.ok ? '#4ade80' : '#ffb547') : 'rgba(255,255,255,0.85)';
+  if (opt('guide', true)) drawGuide(octx, ref, W, H, color, dpr);
+  if (ev) {
+    octx.save(); octx.fillStyle = color; octx.strokeStyle = color; octx.lineWidth = 2 * dpr;
+    octx.beginPath(); octx.moveTo(ev.L[0], ev.L[1]); octx.lineTo(ev.R[0], ev.R[1]); octx.stroke();
+    for (const p of [ev.L, ev.R]) { octx.beginPath(); octx.arc(p[0], p[1], 4 * dpr, 0, Math.PI * 2); octx.fill(); }
+    octx.restore();
+    if (!ev.c.pos) drawArrow(octx, ev.M, ev.Mr, '#ffb547', dpr);
+  }
+  if (lv) drawLevel(octx, lv, W, H, dpr);
+  if (S.countdown || S.pending) return;
+  const hints = [...(lv ? lv.hints : []), ...(ev ? ev.hints : [])];
+  if (S.lmStatus === 'loading') setPill('', '正在加载人脸关键点…');
+  else if (S.lmStatus === 'failed') setPill('', lv && !lv.ok ? lv.hints.join(' · ') : '关键点没加载上，用虚线和残影对齐');
+  else if (!face) setPill('bad', '没检测到人脸');
+  else if (!hints.length) setPill('ok', lv ? '✓ 已对齐，手机也是正的' : '✓ 已对齐');
+  else setPill('warn', hints.join(' · '));
+  const ready = ev && ev.ok && (!S.levelOn || (lv && lv.ok));
+  if (opt('autoCapture', false) && ready && !S.busy && !document.querySelector('dialog[open]')) {
+    if (!S.alignedSince) S.alignedSince = now;
+    if (now - S.alignedSince > 800) { S.alignedSince = 0; onShoot(true); }
+  } else S.alignedSince = 0;
+}
+function loop(now) { requestAnimationFrame(loop); detectLive(now); draw(now); }
+
+// ------------------------------------------------------------------ sound
+let actx;
+function unlockAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (_) {} }
+function beep(f = 660, dur = 0.08, vol = 0.15) {
+  if (!opt('sound', true) || !actx) return;
+  try { const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = f; g.gain.setValueAtTime(vol, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur + 0.02); } catch (_) {}
+}
+
+// ------------------------------------------------------------------ shooting & saving
+function onShoot(auto) {
+  if (S.busy || S.pending) return;
+  if (S.countdown) { cancelCountdown(); return; }
+  if (!S.vw) return;
+  if (!auto) unlockAudio();
+  const n = Number(opt('countdown', 3));
+  if (!n) return capture();
+  let left = n; const cd = $('#countdown');
+  cd.style.display = 'flex'; cd.textContent = left; $('#lookHere').style.display = 'block';
+  setPill('', '看镜头，保持不动　再按一次取消'); beep();
+  S.countdown = setInterval(() => { left--; if (left <= 0) { cancelCountdown(); capture(); return; } cd.textContent = left; beep(); }, 1000);
+}
+function cancelCountdown() { clearInterval(S.countdown); S.countdown = null; $('#countdown').style.display = 'none'; $('#lookHere').style.display = 'none'; }
+
+async function capture() {
+  S.busy = true;
+  try {
+    const W = S.vw, H = S.vh, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    if (mirror()) { g.translate(W, 0); g.scale(-1, 1); }
+    g.drawImage(video, 0, 0, W, H);
+    beep(1320, 0.12, 0.2);
+    const fl = $('#flash'); fl.style.transition = 'none'; fl.style.opacity = '0.85';
+    requestAnimationFrame(() => { fl.style.transition = 'opacity .45s'; fl.style.opacity = '0'; });
+    const blob = await canvasToBlob(c, 0.93);
+    const date = today();
+    S.pending = { blob, date, canvas: c, name: `${date}.jpg`, url: URL.createObjectURL(blob) };
+    $('#sheetImg').src = S.pending.url;
+    const done = S.history.includes(date);
+    $('#sheetName').textContent = `${S.pending.name}　${W}×${H}${done ? '　（今天已保存过，这张会作为新的一张）' : ''}`;
+    $('#sheet').style.display = 'flex';
+  } catch (e) { toast('拍照失败：' + e.message); }
+  finally { S.busy = false; }
+}
+
+async function makeThumb(source, w = 720) {
+  const sw = source.width, sh = source.height, c = document.createElement('canvas');
+  c.width = w; c.height = Math.round(sh * w / sw);
+  c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+  return canvasToBlob(c, 0.85);
+}
+
+async function afterSaved() {
+  const p = S.pending; if (!p) return;
+  if (!S.history.includes(p.date)) { S.history.push(p.date); S.history.sort(); store.set('history', S.history); }
+  const thumb = await makeThumb(p.canvas);
+  S.ghostPrev = { date: p.date, blob: thumb, w: p.canvas.width, h: p.canvas.height, mirror: mirror() };
+  store.set('ghostPrev', S.ghostPrev);
+  if (!S.ghostFirst) { S.ghostFirst = S.ghostPrev; store.set('ghostFirst', S.ghostFirst); }
+  if (S.settings.mirror === undefined) set('mirror', mirror());
+  // precise landmarks on the saved frame become the reference on the first day (or a retake of that day)
+  try {
+    const lmk = await getImageLandmarker();
+    const res = lmk.detect(p.canvas);
+    const lm = res && res.faceLandmarks && res.faceLandmarks[0];
+    const f = lm ? faceFromLandmarks(lm, p.canvas.width, p.canvas.height, false) : null;
+    const cur = S.settings.reference;
+    if (f && (!cur || cur.date === p.date)) {
+      set('reference', { date: p.date, eyes: f.eyes, shape: f.shape, w: p.canvas.width, h: p.canvas.height });
+      toast('已设为基准，引导线改为你自己的五官位置', 3500);
+    }
+  } catch (e) { console.warn(e); }
+  renderAll();
+}
+function closeSheet() { const p = S.pending; if (p) URL.revokeObjectURL(p.url); S.pending = null; $('#sheet').style.display = 'none'; }
+
+function saveDownload() {
+  const p = S.pending; if (!p) return;
+  const a = document.createElement('a'); a.href = p.url; a.download = p.name; document.body.appendChild(a); a.click(); a.remove();
+  afterSaved().then(() => setTimeout(closeSheet, 400));
+  toast(`已保存 ${p.name}`);
+}
+async function saveShare() {
+  const p = S.pending; if (!p) return;
+  const file = new File([p.blob], p.name, { type: 'image/jpeg' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); await afterSaved(); closeSheet(); toast('已分享'); }
+    catch (e) { if (e.name !== 'AbortError') toast('分享失败：' + e.message); }
+  } else { toast('这个浏览器不支持分享文件，请用“保存”'); }
+}
+
+// ------------------------------------------------------------------ rendering
+function renderAll() {
+  const t = today(), d = parseYmd(t), first = S.history[0];
+  const dayN = first ? dayDiff(first, t) + 1 : 1;
+  $('#dateInfo').textContent = `${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]} · 第 ${dayN} 天`;
+  const set_ = new Set(S.history); let streak = 0; const cur = new Date(d);
+  if (!set_.has(t)) cur.setDate(cur.getDate() - 1);
+  while (set_.has(ymd(cur))) { streak++; cur.setDate(cur.getDate() - 1); }
+  const fr = FRAMINGS[opt('framing', 'medium')] || FRAMINGS.medium;
+  const noRef = !S.settings.reference;
+  $('#framingRow').style.display = noRef ? 'flex' : 'none';
+  document.querySelectorAll('#framingSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === opt('framing', 'medium')));
+  $('#status').textContent = S.history.length
+    ? `这台手机已拍 ${S.history.length} 天 · 连续 ${streak} 天${set_.has(t) ? ' · 今天已拍 ✓' : ''}`
+    : `${fr.label}，${fr.note}。第一张会成为以后每天的基准，找一个每天都能复现的位置。`;
+  $('#shutter').classList.toggle('retake', set_.has(t));
+  const mode = opt('ghost', 'prev');
+  document.querySelectorAll('#ghostSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
+  $('#ghostOpacity').value = opt('ghostOpacity', 0.3);
+  const gp = mode === 'off' ? null : (mode === 'first' ? S.ghostFirst : S.ghostPrev);
+  if (gp && gp.blob) {
+    if (ghost.dataset.key !== gp.date + mode) { if (ghost.src) URL.revokeObjectURL(ghost.src); ghost.src = URL.createObjectURL(gp.blob); ghost.dataset.key = gp.date + mode; }
+    ghost.style.display = 'block'; ghost.style.opacity = opt('ghostOpacity', 0.3);
+    ghost.style.transform = gp.mirror !== undefined && gp.mirror !== mirror() ? 'scaleX(-1)' : 'none';
+  } else ghost.style.display = 'none';
+  $('#autoBtn').classList.toggle('on', opt('autoCapture', false));
+}
+
+function openSettings() {
+  $('#guideChk').checked = opt('guide', true); $('#cropChk').checked = opt('cropFrames', true);
+  $('#mirrorChk').checked = mirror(); $('#mirrorChk').disabled = S.history.length > 0;
+  $('#mirrorNote').textContent = S.history.length ? '已经有照片了，镜像锁定，保证前后一致。' : '';
+  $('#cdSel').value = String(opt('countdown', 3)); $('#soundChk').checked = opt('sound', true);
+  const ds = $('#dayStartSel'); ds.innerHTML = '';
+  for (let h = 0; h <= 6; h++) { const o = document.createElement('option'); o.value = h; o.textContent = h ? `凌晨 ${h} 点` : '0 点'; ds.appendChild(o); }
+  ds.value = String(opt('dayStartHour', 4));
+  const r = reference();
+  $('#refInfo').textContent = r.isDefault ? '现在是默认引导线（取景大小在主界面选），第一张有人脸的照片会自动成为基准。' : `基准来自 ${r.date || '导入的照片'}。想换取景大小，先点“恢复默认引导线”。`;
+  $('#settingsDlg').showModal();
+}
+
+async function importPhoto(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const lmk = await getImageLandmarker();
+    const res = lmk.detect(bmp);
+    const lm = res && res.faceLandmarks && res.faceLandmarks[0];
+    const f = lm ? faceFromLandmarks(lm, bmp.width, bmp.height, false) : null;
+    const thumb = await makeThumb(bmp);
+    const m = /(\d{4}-\d{2}-\d{2})/.exec(file.name);
+    S.ghostPrev = { date: m ? m[1] : 'imported', blob: thumb, w: bmp.width, h: bmp.height, mirror: mirror() };
+    store.set('ghostPrev', S.ghostPrev);
+    if (!S.ghostFirst) { S.ghostFirst = S.ghostPrev; store.set('ghostFirst', S.ghostFirst); }
+    if (f) set('reference', { date: S.ghostPrev.date, eyes: f.eyes, shape: f.shape, w: bmp.width, h: bmp.height });
+    toast(f ? '已导入：残影和基准都用这张' : '已导入残影（这张没检测到人脸，基准没变）');
+    renderAll(); $('#settingsDlg').close();
+  } catch (e) { toast('导入失败：' + e.message); }
+}
+
+function bindUI() {
+  $('#shutter').onclick = () => onShoot(false);
+  $('#stage').addEventListener('click', () => { if (S.countdown) cancelCountdown(); });
+  $('#levelBtn').onclick = () => (S.levelOn ? disableLevel() : enableLevel(true));
+  $('#autoBtn').onclick = () => { set('autoCapture', !opt('autoCapture', false)); renderAll(); toast(opt('autoCapture', false) ? '自动拍：对齐' + (S.levelOn ? '且手机水平' : '') + '后自动倒计时' : '自动拍已关闭'); };
+  document.querySelectorAll('#ghostSeg button').forEach(b => b.onclick = () => { set('ghost', b.dataset.v); renderAll(); });
+  document.querySelectorAll('#framingSeg button').forEach(b => b.onclick = () => { set('framing', b.dataset.v); renderAll(); });
+  $('#ghostOpacity').oninput = e => { ghost.style.opacity = e.target.value; };
+  $('#ghostOpacity').onchange = e => set('ghostOpacity', Number(e.target.value));
+  $('#saveBtn').onclick = saveDownload; $('#shareBtn').onclick = saveShare; $('#discardBtn').onclick = closeSheet;
+  $('#settingsBtn').onclick = openSettings; $('#helpBtn').onclick = () => $('#helpDlg').showModal();
+  document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
+  $('#guideChk').onchange = e => set('guide', e.target.checked);
+  $('#cropChk').onchange = e => set('cropFrames', e.target.checked);
+  $('#mirrorChk').onchange = e => { set('mirror', e.target.checked); layoutStage(); renderAll(); };
+  $('#cdSel').onchange = e => set('countdown', Number(e.target.value));
+  $('#soundChk').onchange = e => set('sound', e.target.checked);
+  $('#dayStartSel').onchange = e => { set('dayStartHour', Number(e.target.value)); renderAll(); };
+  $('#importInput').onchange = e => { const f = e.target.files && e.target.files[0]; if (f) importPhoto(f); e.target.value = ''; };
+  $('#refReset').onclick = () => { set('reference', undefined); delete S.settings.reference; store.set('settings', S.settings); toast('已恢复默认引导线'); $('#settingsDlg').close(); };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.stream && S.track && S.track.readyState === 'ended') startCamera(); renderAll(); });
+}
+
+boot();
+</script>
+</body>
+</html>
