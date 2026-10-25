@@ -89,6 +89,9 @@ ol li{margin:4px 0}
 </div>
 
 <div id="controls">
+  <div class="row" id="sizeRow" style="display:none"><span>头的大小</span>
+    <div class="seg"><button id="sizeDown">小一点</button><span id="sizeLabel" style="padding:5px 8px;font-size:13px;color:var(--muted)"></span><button id="sizeUp">大一点</button></div>
+  </div>
   <div class="row" id="framingRow" style="display:none"><span>第一张取景</span>
     <div class="seg" id="framingSeg"><button data-v="close">近景</button><button data-v="medium">中景</button><button data-v="wide">远景</button></div>
   </div>
@@ -163,6 +166,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
+const APP_VERSION = '5';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -299,14 +303,14 @@ async function startCamera(fmt) {
   layoutStage(); renderAll();
 }
 function camInfo() {
-  if (!S.vw) return '';
+  if (!S.vw) return `版本 ${APP_VERSION}`;
   const landscape = S.vw > S.vh, portraitUI = window.innerHeight > window.innerWidth;
   let t = `摄像头画面 ${S.vw}×${S.vh}（${S.vw === S.vh ? '方' : landscape ? '横' : '竖'}，${(FORMATS[S.fmt] || FORMATS.auto).label}）`;
   try { const z = S.track.getSettings().zoom, c = S.track.getCapabilities ? S.track.getCapabilities().zoom : null; if (c) t += ` · 缩放 ${z ?? '-'}（${c.min}–${c.max}）`; } catch (_) {}
   if (landscape && portraitUI && target() === '9x16') t += ' · 手机竖着但画面是横的，9:16 只能用中间一条';
   if (!landscape && target() === '4x3') t += ' · 画面是竖的，4:3 只能用中间一段';
   if (S.settings.reference && !refValid()) t += ' · 画面格式和基准不同，下一张会成为新的基准';
-  return t;
+  return t + ` · 版本 ${APP_VERSION}`;
 }
 function camError(e) {
   const m = $('#camMsg'); m.style.display = 'flex';
@@ -639,6 +643,8 @@ function renderAll() {
   while (set_.has(ymd(cur))) { streak++; cur.setDate(cur.getDate() - 1); }
   const fr = FRAMINGS[opt('framing', 'medium')] || FRAMINGS.medium;
   const noRef = !refValid();
+  $('#sizeRow').style.display = (!noRef && S.history.length <= 1) ? 'flex' : 'none';
+  if (!noRef) $('#sizeLabel').textContent = `脸宽 ${Math.round(refFaceShare() * 100)}%`;
   $('#framingRow').style.display = noRef ? 'flex' : 'none';
   document.querySelectorAll('#framingSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === opt('framing', 'medium')));
   $('#status').textContent = S.history.length
@@ -651,7 +657,8 @@ function renderAll() {
   document.querySelectorAll('#ghostSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
   $('#ghostOpacity').value = opt('ghostOpacity', 0.3);
   const gp = mode === 'off' ? null : (mode === 'first' ? S.ghostFirst : S.ghostPrev);
-  if (gp && gp.blob && !(gp.w && S.vw && !sameAspect(gp.w, gp.h, S.vw, S.vh))) {
+  const rescaled = !!(S.settings.reference && S.settings.reference.scaled);
+  if (gp && gp.blob && !rescaled && !(gp.w && S.vw && !sameAspect(gp.w, gp.h, S.vw, S.vh))) {
     if (ghost.dataset.key !== gp.date + mode) { if (ghost.src) URL.revokeObjectURL(ghost.src); ghost.src = URL.createObjectURL(gp.blob); ghost.dataset.key = gp.date + mode; }
     ghost.style.display = 'block'; ghost.style.opacity = opt('ghostOpacity', 0.3);
     ghost.style.transform = gp.mirror !== undefined && gp.mirror !== mirror() ? 'scaleX(-1)' : 'none';
@@ -703,6 +710,26 @@ async function runFovTest() {
   toast(`已选 ${FORMATS[best.fmt].label}。` + lines.join('；'), 9000);
 }
 
+// Face width as a share of the target picture's width, from the reference (its own face shape when known).
+function refFaceShare() {
+  const r = reference(), W = S.vw || 1920, H = S.vh || 1440;
+  const ipd = Math.hypot((r.eyes[1][0] - r.eyes[0][0]) * W, (r.eyes[1][1] - r.eyes[0][1]) * H);
+  const k = r.shape && r.shape.rx ? 2 * r.shape.rx : 2.3;
+  return k * ipd / cropWidthFor(W, H, target());
+}
+// Shrink or grow the target face size around the eye midpoint; the next photo (a retake of the same day) becomes
+// the new reference, so this is meant for setting up day 1.
+function scaleReference(f) {
+  const r = S.settings.reference;
+  if (!r || !refValid()) return;
+  const W = r.w || S.vw, H = r.h || S.vh;
+  const L = [r.eyes[0][0] * W, r.eyes[0][1] * H], R = [r.eyes[1][0] * W, r.eyes[1][1] * H], M = mid(L, R);
+  const sc = q => [(M[0] + (q[0] - M[0]) * f) / W, (M[1] + (q[1] - M[1]) * f) / H];
+  set('reference', { ...r, eyes: [sc(L), sc(R)], scaled: true });
+  renderAll();
+  toast(f < 1 ? '目标变小了：往后退，直到提示变绿，再重拍今天这张' : '目标变大了：往前靠，直到提示变绿');
+}
+
 function openSettings() {
   $('#targetSel').value = target();
   $('#fmtSel').value = opt('camFormat', 'auto');
@@ -745,6 +772,8 @@ function bindUI() {
   $('#autoBtn').onclick = () => { set('autoCapture', !opt('autoCapture', false)); renderAll(); toast(opt('autoCapture', false) ? '自动拍：对齐' + (S.levelOn ? '且手机水平' : '') + '后自动倒计时' : '自动拍已关闭'); };
   document.querySelectorAll('#ghostSeg button').forEach(b => b.onclick = () => { set('ghost', b.dataset.v); renderAll(); });
   document.querySelectorAll('#framingSeg button').forEach(b => b.onclick = () => { set('framing', b.dataset.v); renderAll(); });
+  $('#sizeDown').onclick = () => scaleReference(1 / 1.08);
+  $('#sizeUp').onclick = () => scaleReference(1.08);
   $('#ghostOpacity').oninput = e => { ghost.style.opacity = e.target.value; };
   $('#ghostOpacity').onchange = e => set('ghostOpacity', Number(e.target.value));
   $('#saveBtn').onclick = saveDownload; $('#shareBtn').onclick = saveShare; $('#discardBtn').onclick = closeSheet;
