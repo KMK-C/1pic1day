@@ -166,7 +166,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
-const APP_VERSION = '5';
+const APP_VERSION = '6';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -194,8 +194,11 @@ function defaultRef() {
   const half = f.ipd[t] * cropWidthFor(W, H, t) / W / 2;
   return { eyes: [[0.5 - half, 0.40], [0.5 + half, 0.40]], shape: DEFAULT_SHAPE, isDefault: true };
 }
-const TOL = { pos: 0.10, scale: 0.05, roll: 2.5, yaw: 0.06, pitch: 0.07 };
-const LEVEL_TOL = { pitch: 3, roll: 2 };
+// Capture tolerances. Position, size and tilt are corrected exactly at export (alignment by the eyes), so they only
+// need to be roughly right; head turn / nod and phone pitch change the perspective and cannot be fixed later.
+// Once green, a 25% margin keeps small hand shake from flipping it back (hysteresis).
+const TOL = { pos: 0.30, scale: 0.10, roll: 6, yaw: 0.08, pitch: 0.09 };
+const LEVEL_TOL = { pitch: 5, roll: 5 };
 const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'];
 
 const $ = s => document.querySelector(s);
@@ -397,7 +400,8 @@ function evaluate(face, ref, W, H) {
   const roll = (Math.atan2(R[1] - L[1], R[0] - L[0])) * 180 / Math.PI;
   const yaw = face.shape.noseX - (ref.isDefault ? 0 : ref.shape.noseX);
   const pitch = ref.isDefault ? 0 : face.shape.nose - ref.shape.nose;
-  const c = { scale: Math.abs(scale - 1) < TOL.scale, pos: offN < TOL.pos, roll: Math.abs(roll) < TOL.roll, yaw: Math.abs(yaw) < TOL.yaw, pitch: Math.abs(pitch) < TOL.pitch };
+  const m = S.wasOk ? 1.25 : 1;
+  const c = { scale: Math.abs(scale - 1) < TOL.scale * m, pos: offN < TOL.pos * m, roll: Math.abs(roll) < TOL.roll * m, yaw: Math.abs(yaw) < TOL.yaw * m, pitch: Math.abs(pitch) < TOL.pitch * m };
   const hints = [];
   if (!c.scale) hints.push(scale < 1 ? '靠近一点' : '远一点');
   if (!c.pos) hints.push('按箭头移动');
@@ -433,10 +437,11 @@ function disableLevel() { window.removeEventListener('devicemotion', onMotion); 
 function levelState() {
   if (!S.levelOn || !S.level || performance.now() - S.level.t > 1000) return null;
   const { roll, pitch } = S.level;
-  const ok = Math.abs(pitch) < LEVEL_TOL.pitch && Math.abs(roll) < LEVEL_TOL.roll;
+  const m = S.levelWasOk ? 1.25 : 1;
+  const ok = Math.abs(pitch) < LEVEL_TOL.pitch * m && Math.abs(roll) < LEVEL_TOL.roll * m;
   const hints = [];
-  if (Math.abs(pitch) >= LEVEL_TOL.pitch) hints.push(pitch > 0 ? '手机在仰拍，上端朝自己压一点' : '手机在俯拍，上端往后仰一点');
-  if (Math.abs(roll) >= LEVEL_TOL.roll) hints.push('手机左右放平');
+  if (Math.abs(pitch) >= LEVEL_TOL.pitch * m) hints.push(pitch > 0 ? '手机在仰拍，上端朝自己压一点' : '手机在俯拍，上端往后仰一点');
+  if (Math.abs(roll) >= LEVEL_TOL.roll * m) hints.push('手机左右放平');
   return { ok, roll, pitch, hints };
 }
 
@@ -509,6 +514,7 @@ function draw(now) {
   const face = S.face && now - S.face.t < 500 ? S.face : null;
   const ev = face ? evaluate(face, ref, W, H) : null; lastEval = ev;
   const lv = levelState();
+  S.wasOk = !!(ev && ev.ok); S.levelWasOk = !!(lv && lv.ok);
   const b = opt('cropFrames', true) ? framingTarget(ref, W, H) : null;
   if (b && (b.w < W * 0.93 || b.h < H * 0.93)) {
     octx.fillStyle = 'rgba(0,0,0,0.38)';
