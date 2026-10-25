@@ -166,7 +166,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
-const APP_VERSION = '6';
+const APP_VERSION = '7';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -255,6 +255,24 @@ function reference() {
   }
   return defaultRef();
 }
+
+// ------------------------------------------------------------------ self-update
+// GitHub Pages lets browsers cache the page for 10 minutes (longer for a Home Screen web app). version.json is
+// fetched past every cache; if it names a newer version, reload under a new URL so the fresh page is fetched.
+async function checkForUpdate() {
+  try {
+    const r = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const v = String((await r.json()).version || '');
+    if (!v || v === APP_VERSION) return;
+    const key = '1p1d-reloaded-' + v;
+    if (sessionStorage.getItem(key)) return; // already tried once this session: avoid a reload loop
+    sessionStorage.setItem(key, '1');
+    location.replace(location.pathname + '?v=' + encodeURIComponent(v));
+  } catch (_) {}
+}
+checkForUpdate();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
 
 // ------------------------------------------------------------------ boot
 async function boot() {
