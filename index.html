@@ -35,7 +35,14 @@ button,select,input{font:inherit;color:inherit}
 #pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
 #pillText{overflow:hidden;text-overflow:ellipsis}
 #camMsg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;line-height:1.7;color:var(--muted);background:#000;font-size:14px}
-#controls{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:12px 16px}
+#controls{flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;padding:10px 16px}
+#fine{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;font-size:12.5px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+.fi{display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden;min-width:0}
+.fi i{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:#3a3a42}
+.fi.g i{background:var(--ok)}.fi.y i{background:#d9d052}.fi.r i{background:var(--bad)}
+.fi b{font-weight:500;color:var(--muted);flex:0 0 auto}
+.fi span{overflow:hidden;text-overflow:ellipsis}
+.fi.n span{color:#5c5c66}
 .row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px}
 .seg{display:flex;background:var(--panel);border-radius:9px;padding:2px;border:1px solid var(--line)}
 .seg button{border:0;background:transparent;padding:5px 11px;border-radius:7px;font-size:13px;color:var(--muted)}
@@ -95,10 +102,12 @@ ol li{margin:4px 0}
   <div class="row" id="framingRow" style="display:none"><span>第一张取景</span>
     <div class="seg" id="framingSeg"><button data-v="close">近景</button><button data-v="medium">中景</button><button data-v="wide">远景</button></div>
   </div>
+  <div id="fine"></div>
   <div class="row"><span>残影</span>
+    <div class="seg" id="ghostStyleSeg"><button data-v="edges">轮廓</button><button data-v="photo">照片</button></div>
     <div class="seg" id="ghostSeg"><button data-v="prev">上一张</button><button data-v="first">第一张</button><button data-v="off">关</button></div>
   </div>
-  <input type="range" id="ghostOpacity" min="0" max="0.7" step="0.05">
+  <input type="range" id="ghostOpacity" min="0" max="1" step="0.05">
   <div id="shootRow">
     <button class="side-btn" id="levelBtn"><span class="ic">◎</span><span>水平仪</span></button>
     <button id="shutter" aria-label="拍照"><span></span></button>
@@ -156,7 +165,7 @@ ol li{margin:4px 0}
     <b style="color:var(--text)">每天拍</b>
     <ol>
       <li>手机竖直拿在眼睛高度，水平仪变绿</li>
-      <li>两只眼睛对准两个小圆，脸放进椭圆，全部变绿</li>
+      <li>看画面下面的面板逐项调：红色先调，绿色就是和第一天一致；背景对齐青色轮廓线（门框、床架这些边）</li>
       <li>按快门，倒计时期间看镜头（屏幕上方）</li>
       <li>点“保存到 1Pic1Day 文件夹” › 下载</li>
     </ol>
@@ -166,7 +175,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
-const APP_VERSION = '7';
+const APP_VERSION = '8';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -410,23 +419,73 @@ function detectLive(now) {
   }
   f.t = now; S.face = f;
 }
-function evaluate(face, ref, W, H) {
+// ------------------------------------------------------------------ fine-grained assessment
+// g = matches the reference closely, y = fine to shoot (export alignment fixes position, size and tilt exactly),
+// r = adjust. Perspective items come first because the export cannot fix them.
+const FINE = {
+  dist:  { g: 3,   y: 7,  label: '远近' },    // % face size difference (= distance difference)
+  yaw:   { g: 3,   y: 6,  label: '转头' },    // degrees, estimated from the nose tip vs. the eyes
+  pitch: { g: 3,   y: 6,  label: '抬低头' },
+  phone: { g: 3,   y: 6,  label: '手机' },    // degrees from the motion sensor
+  bg:    { g: 0,   y: 0,  label: '背景' },    // not measured: aligned by eye against the edge ghost
+  pos:   { g: 8,   y: 20, label: '位置' },    // millimetres at the face (eye distance taken as 63 mm)
+  roll:  { g: 2.5, y: 6,  label: '歪头' },    // degrees
+};
+const FINE_ORDER = ['phone', 'dist', 'yaw', 'pitch', 'bg', 'pos', 'roll']; // camera orientation first: tilting the phone moves everything else
+const IPD_MM = 63, DEG_PER_IPD = 50;   // a nose-tip shift of 0.02 eye distances is about 1 degree of head rotation
+const REF_DIST_CM = 40;                // typical arm's-length distance, only used to put cm on the size difference
+const f1 = v => (Math.round(Math.abs(v) * 10) / 10).toFixed(1);
+function gradeOf(k, err) {
+  const t = FINE[k], keep = S.lastGrades && S.lastGrades[k] === 'g' ? 1.2 : 1; // hysteresis against hand shake
+  return err < t.g * keep ? 'g' : err < t.y ? 'y' : 'r';
+}
+function assess(face, ref, W, H, lv) {
   const px = p => [p[0] * W, p[1] * H];
   const Lr = px(ref.eyes[0]), Rr = px(ref.eyes[1]), L = px(face.eyes[0]), R = px(face.eyes[1]);
   const dRef = dist(Lr, Rr), d = dist(L, R), Mr = mid(Lr, Rr), M = mid(L, R);
-  const offN = Math.hypot(M[0] - Mr[0], M[1] - Mr[1]) / dRef, scale = d / dRef;
-  const roll = (Math.atan2(R[1] - L[1], R[0] - L[0])) * 180 / Math.PI;
-  const yaw = face.shape.noseX - (ref.isDefault ? 0 : ref.shape.noseX);
-  const pitch = ref.isDefault ? 0 : face.shape.nose - ref.shape.nose;
-  const m = S.wasOk ? 1.25 : 1;
-  const c = { scale: Math.abs(scale - 1) < TOL.scale * m, pos: offN < TOL.pos * m, roll: Math.abs(roll) < TOL.roll * m, yaw: Math.abs(yaw) < TOL.yaw * m, pitch: Math.abs(pitch) < TOL.pitch * m };
-  const hints = [];
-  if (!c.scale) hints.push(scale < 1 ? '靠近一点' : '远一点');
-  if (!c.pos) hints.push('按箭头移动');
-  if (!c.roll) hints.push('头摆正');
-  if (!c.yaw) hints.push('脸转正');
-  if (!c.pitch) hints.push(pitch > 0 ? '抬一点下巴' : '收一点下巴');
-  return { ok: !hints.length, hints, c, M, Mr, L, R };
+  const mir = mirror(), it = {};
+  // In the mirrored preview the screen behaves like a mirror: screen-left is the user's left.
+  const mm = IPD_MM / dRef, dx = (M[0] - Mr[0]) * mm, dy = (M[1] - Mr[1]) * mm, parts = [];
+  if (Math.abs(dx) >= 4) parts.push(`往${(mir ? dx > 0 : dx < 0) ? '左' : '右'} ${f1(dx / 10)} cm`);
+  if (Math.abs(dy) >= 4) parts.push(`往${dy > 0 ? '上' : '下'} ${f1(dy / 10)} cm`);
+  it.pos = { err: Math.hypot(dx, dy), text: parts.join('，') || '✓' };
+  const pct = (d / dRef - 1) * 100;
+  it.dist = { err: Math.abs(pct), text: Math.abs(pct) < 1.5 ? '✓' : `${pct > 0 ? '往后' : '往前'} ${f1(REF_DIST_CM * pct / 100)} cm（${pct > 0 ? '大' : '小'}了 ${Math.round(Math.abs(pct))}%）` };
+  const yaw = (face.shape.noseX - (ref.isDefault ? 0 : ref.shape.noseX)) * DEG_PER_IPD;
+  const turnedRight = mir ? yaw > 0 : yaw < 0;
+  it.yaw = { err: Math.abs(yaw), text: Math.abs(yaw) < 1 ? '✓' : `脸往${turnedRight ? '左' : '右'}转 ${f1(yaw)}°` };
+  if (!ref.isDefault) {
+    const pitch = (face.shape.nose - ref.shape.nose) * DEG_PER_IPD; // > 0: nose lower than day 1 = head tipped down
+    it.pitch = { err: Math.abs(pitch), text: Math.abs(pitch) < 1 ? '✓' : (pitch > 0 ? `抬头 ${f1(pitch)}°` : `低头 ${f1(pitch)}°`) };
+  }
+  const roll = Math.atan2(R[1] - L[1], R[0] - L[0]) * 180 / Math.PI;
+  const tiltedRight = mir ? roll > 0 : roll < 0;
+  it.roll = { err: Math.abs(roll), text: Math.abs(roll) < 1 ? '✓' : `头往${tiltedRight ? '左' : '右'}正 ${f1(roll)}°` };
+  if (lv) {
+    const big = Math.abs(lv.pitch) >= Math.abs(lv.roll);
+    const e = Math.max(Math.abs(lv.pitch), Math.abs(lv.roll));
+    it.phone = { err: e, text: e < 1 ? '✓' : big ? (lv.pitch > 0 ? `上端朝自己压 ${f1(lv.pitch)}°` : `上端往后仰 ${f1(lv.pitch)}°`) : `左右放平 ${f1(lv.roll)}°` };
+  }
+  const grades = {};
+  for (const k of Object.keys(it)) { it[k].grade = gradeOf(k, it[k].err); grades[k] = it[k].grade; }
+  S.lastGrades = grades;
+  const gs = Object.values(grades);
+  const perfect = gs.every(g => g === 'g'), ok = gs.every(g => g !== 'r');
+  let top = null;
+  for (const want of ['r', 'y']) { top = FINE_ORDER.find(k => it[k] && it[k].grade === want); if (top) break; }
+  return { items: it, perfect, ok, top, M, Mr, L, R, posOk: !it.pos || it.pos.grade === 'g' };
+}
+
+let fineT = 0;
+function renderFine(ev, now) {
+  if (now - fineT < 200) return; fineT = now;
+  const el = $('#fine');
+  el.innerHTML = FINE_ORDER.map(k => {
+    const x = ev && ev.items[k];
+    const cls = x ? x.grade : 'n';
+    const txt = x ? (x.short || x.text) : (k === 'phone' ? '开水平仪才有' : k === 'bg' ? (ghost.style.display === 'block' && opt('ghostStyle', 'edges') === 'edges' ? '对齐青色轮廓线' : '残影选“轮廓”来对齐') : k === 'pitch' ? '拍完第一张才有' : '—');
+    return `<div class="fi ${cls}"><i></i><b>${FINE[k].label}</b><span>${txt}</span></div>`;
+  }).join('');
 }
 
 // ------------------------------------------------------------------ level (gravity from the accelerometer)
@@ -461,6 +520,53 @@ function levelState() {
   if (Math.abs(pitch) >= LEVEL_TOL.pitch * m) hints.push(pitch > 0 ? '手机在仰拍，上端朝自己压一点' : '手机在俯拍，上端往后仰一点');
   if (Math.abs(roll) >= LEVEL_TOL.roll * m) hints.push('手机左右放平');
   return { ok, roll, pitch, hints };
+}
+
+// ------------------------------------------------------------------ person mask (used to fade the person in the edge ghost)
+const BG = { w: 128, h: 96 };
+function bgMask(ref) {
+  const { w, h } = BG, m = new Uint8Array(w * h);
+  const L = [ref.eyes[0][0] * w, ref.eyes[0][1] * h], R = [ref.eyes[1][0] * w, ref.eyes[1][1] * h];
+  const ipd = dist(L, R), [cx, cy] = mid(L, R), rx = (ref.shape && ref.shape.rx) || 1.15;
+  const top = cy - 2.3 * ipd, chin = cy + 2.0 * ipd;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const half = y < chin ? 1.5 * rx * ipd : 3.4 * rx * ipd;
+    if (y > top && Math.abs(x - cx) < half) m[y * w + x] = 1;
+  }
+  return m;
+}
+
+// Edge-only version of the ghost: background lines to align against without covering the face.
+const EDGE_CACHE = {};
+async function edgeGhostURL(gp) {
+  const key = gp.date + ':' + (gp.blob.size || 0) + ':' + reference().eyes.flat().map(v => v.toFixed(2)).join(',');
+  if (EDGE_CACHE[key]) return EDGE_CACHE[key];
+  const bmp = await createImageBitmap(gp.blob);
+  const w = 480, h = Math.round(bmp.height * 480 / bmp.width);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(bmp, 0, 0, w, h);
+  const src = x.getImageData(0, 0, w, h), d = src.data, g = new Float32Array(w * h), m = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) g[i] = 0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2];
+  const vals = [];
+  for (let yy = 1; yy < h - 1; yy++) for (let xx = 1; xx < w - 1; xx++) {
+    const i = yy * w + xx;
+    const gx = (g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1]) - (g[i - w - 1] + 2 * g[i - 1] + g[i + w - 1]);
+    const gy = (g[i + w - 1] + 2 * g[i + w] + g[i + w + 1]) - (g[i - w - 1] + 2 * g[i - w] + g[i - w + 1]);
+    m[i] = Math.hypot(gx, gy); if ((i & 7) === 0) vals.push(m[i]);
+  }
+  vals.sort((a, b) => a - b);
+  const th = vals[Math.floor(vals.length * 0.86)] || 1;
+  const out = x.createImageData(w, h);
+  const ref = reference(), pm = (() => { const sv = [BG.w, BG.h]; BG.w = w; BG.h = h; const mk = bgMask(ref); BG.w = sv[0]; BG.h = sv[1]; return mk; })();
+  for (let i = 0; i < w * h; i++) {
+    if (m[i] > th) {
+      const a = Math.min(255, 120 + (m[i] - th) / th * 160) * (pm[i] ? 0.3 : 1);
+      out.data[4 * i] = 150; out.data[4 * i + 1] = 235; out.data[4 * i + 2] = 255; out.data[4 * i + 3] = a;
+    }
+  }
+  x.clearRect(0, 0, w, h); x.putImageData(out, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  return (EDGE_CACHE[key] = URL.createObjectURL(blob));
 }
 
 // ------------------------------------------------------------------ drawing
@@ -530,9 +636,9 @@ function draw(now) {
   if (!S.vw) return;
   const ref = reference();
   const face = S.face && now - S.face.t < 500 ? S.face : null;
-  const ev = face ? evaluate(face, ref, W, H) : null; lastEval = ev;
   const lv = levelState();
-  S.wasOk = !!(ev && ev.ok); S.levelWasOk = !!(lv && lv.ok);
+  const ev = face ? assess(face, ref, W, H, lv) : null; lastEval = ev;
+  renderFine(ev, now);
   const b = opt('cropFrames', true) ? framingTarget(ref, W, H) : null;
   if (b && (b.w < W * 0.93 || b.h < H * 0.93)) {
     octx.fillStyle = 'rgba(0,0,0,0.38)';
@@ -542,24 +648,24 @@ function draw(now) {
     octx.save(); octx.fillStyle = 'rgba(255,255,255,0.7)'; octx.font = `${10 * dpr}px -apple-system, sans-serif`; octx.textAlign = 'right';
     octx.fillText(`${TARGETS[target()].label}范围`, b.x + b.w - 6 * dpr, Math.max(b.y, 0) + 14 * dpr); octx.restore();
   }
-  const color = ev ? (ev.ok ? '#4ade80' : '#ffb547') : 'rgba(255,255,255,0.85)';
+  const color = ev ? (ev.perfect ? '#4ade80' : ev.ok ? '#c6e36b' : '#ffb547') : 'rgba(255,255,255,0.85)';
   if (opt('guide', true)) drawGuide(octx, ref, W, H, color, dpr);
   if (ev) {
     octx.save(); octx.fillStyle = color; octx.strokeStyle = color; octx.lineWidth = 2 * dpr;
     octx.beginPath(); octx.moveTo(ev.L[0], ev.L[1]); octx.lineTo(ev.R[0], ev.R[1]); octx.stroke();
     for (const p of [ev.L, ev.R]) { octx.beginPath(); octx.arc(p[0], p[1], 4 * dpr, 0, Math.PI * 2); octx.fill(); }
     octx.restore();
-    if (!ev.c.pos) drawArrow(octx, ev.M, ev.Mr, '#ffb547', dpr);
+    if (!ev.posOk) drawArrow(octx, ev.M, ev.Mr, '#ffb547', dpr);
   }
   if (lv) drawLevel(octx, lv, W, H, dpr);
   if (S.countdown || S.pending || S.testing) return;
-  const hints = [...(lv ? lv.hints : []), ...(ev ? ev.hints : [])];
   if (S.lmStatus === 'loading') setPill('', '正在加载人脸关键点…');
   else if (S.lmStatus === 'failed') setPill('', lv && !lv.ok ? lv.hints.join(' · ') : '关键点没加载上，用虚线和残影对齐');
   else if (!face) setPill('bad', '没检测到人脸');
-  else if (!hints.length) setPill('ok', lv ? '✓ 已对齐，手机也是正的' : '✓ 已对齐');
-  else setPill('warn', hints.join(' · '));
-  const ready = ev && ev.ok && (!S.levelOn || (lv && lv.ok));
+  else if (ev.perfect) setPill('ok', '✓ 完美，和基准一致');
+  else if (ev.ok) setPill('ok', `可以拍 · 还能更准：${FINE[ev.top].label}${ev.items[ev.top].text === '✓' ? '' : ' ' + ev.items[ev.top].text}`);
+  else setPill('warn', `${FINE[ev.top].label} · ${ev.items[ev.top].text}`);
+  const ready = ev && ev.perfect;
   if (opt('autoCapture', false) && ready && !S.busy && !document.querySelector('dialog[open]')) {
     if (!S.alignedSince) S.alignedSince = now;
     if (now - S.alignedSince > 800) { S.alignedSince = 0; onShoot(true); }
@@ -624,7 +730,7 @@ async function afterSaved() {
   const thumb = await makeThumb(p.canvas);
   S.ghostPrev = { date: p.date, blob: thumb, w: p.canvas.width, h: p.canvas.height, mirror: mirror() };
   store.set('ghostPrev', S.ghostPrev);
-  if (!S.ghostFirst) { S.ghostFirst = S.ghostPrev; store.set('ghostFirst', S.ghostFirst); }
+  if (!S.ghostFirst || S.ghostFirst.date === p.date) { S.ghostFirst = S.ghostPrev; store.set('ghostFirst', S.ghostFirst); }
   if (S.settings.mirror === undefined) set('mirror', mirror());
   // precise landmarks on the saved frame become the reference on the first day (or a retake of that day)
   try {
@@ -680,11 +786,20 @@ function renderAll() {
   const mode = opt('ghost', 'prev');
   document.querySelectorAll('#ghostSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
   $('#ghostOpacity').value = opt('ghostOpacity', 0.3);
-  const gp = mode === 'off' ? null : (mode === 'first' ? S.ghostFirst : S.ghostPrev);
+  const gp = mode === 'off' ? null : ((mode === 'first' ? S.ghostFirst : S.ghostPrev) || S.ghostPrev);
+  const style = opt('ghostStyle', 'edges');
+  document.querySelectorAll('#ghostStyleSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === style));
   const rescaled = !!(S.settings.reference && S.settings.reference.scaled);
   if (gp && gp.blob && !rescaled && !(gp.w && S.vw && !sameAspect(gp.w, gp.h, S.vw, S.vh))) {
-    if (ghost.dataset.key !== gp.date + mode) { if (ghost.src) URL.revokeObjectURL(ghost.src); ghost.src = URL.createObjectURL(gp.blob); ghost.dataset.key = gp.date + mode; }
-    ghost.style.display = 'block'; ghost.style.opacity = opt('ghostOpacity', 0.3);
+    const gkey = gp.date + mode + style + (gp.blob.size || 0) + (style === 'edges' ? reference().eyes.flat().map(v => v.toFixed(2)).join(',') : '');
+    if (ghost.dataset.key !== gkey) {
+      ghost.dataset.key = gkey;
+      if (style === 'edges') edgeGhostURL(gp).then(u => { if (ghost.dataset.key === gkey) ghost.src = u; });
+      else { if (ghost.dataset.photoUrl) URL.revokeObjectURL(ghost.dataset.photoUrl); const u = URL.createObjectURL(gp.blob); ghost.dataset.photoUrl = u; ghost.src = u; }
+    }
+    const opKey = style === 'edges' ? 'edgeOpacity' : 'ghostOpacity', opDef = style === 'edges' ? 0.7 : 0.3;
+    $('#ghostOpacity').value = opt(opKey, opDef);
+    ghost.style.display = 'block'; ghost.style.opacity = opt(opKey, opDef);
     ghost.style.transform = gp.mirror !== undefined && gp.mirror !== mirror() ? 'scaleX(-1)' : 'none';
   } else ghost.style.display = 'none';
   $('#autoBtn').classList.toggle('on', opt('autoCapture', false));
@@ -799,7 +914,8 @@ function bindUI() {
   $('#sizeDown').onclick = () => scaleReference(1 / 1.08);
   $('#sizeUp').onclick = () => scaleReference(1.08);
   $('#ghostOpacity').oninput = e => { ghost.style.opacity = e.target.value; };
-  $('#ghostOpacity').onchange = e => set('ghostOpacity', Number(e.target.value));
+  $('#ghostOpacity').onchange = e => set(opt('ghostStyle', 'edges') === 'edges' ? 'edgeOpacity' : 'ghostOpacity', Number(e.target.value));
+  document.querySelectorAll('#ghostStyleSeg button').forEach(b => b.onclick = () => { set('ghostStyle', b.dataset.v); renderAll(); });
   $('#saveBtn').onclick = saveDownload; $('#shareBtn').onclick = saveShare; $('#discardBtn').onclick = closeSheet;
   $('#settingsBtn').onclick = openSettings; $('#helpBtn').onclick = () => $('#helpDlg').showModal();
   document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
