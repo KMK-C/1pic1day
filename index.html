@@ -175,7 +175,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
-const APP_VERSION = '8';
+const APP_VERSION = '9';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -282,6 +282,8 @@ async function checkForUpdate() {
 }
 checkForUpdate();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+// Keep the ~15 MB face-landmark runtime and model on the phone (see sw.js): later opens skip the download.
+if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
 
 // ------------------------------------------------------------------ boot
 async function boot() {
@@ -385,6 +387,7 @@ async function createLandmarker(mode) {
   throw lastErr;
 }
 async function loadLandmarker() {
+  S.lmStart = performance.now();
   try { S.landmarker = await createLandmarker('VIDEO'); S.lmStatus = 'ready'; }
   catch (e) { console.error(e); S.lmStatus = 'failed'; }
 }
@@ -659,7 +662,7 @@ function draw(now) {
   }
   if (lv) drawLevel(octx, lv, W, H, dpr);
   if (S.countdown || S.pending || S.testing) return;
-  if (S.lmStatus === 'loading') setPill('', '正在加载人脸关键点…');
+  if (S.lmStatus === 'loading') setPill('', performance.now() - (S.lmStart || 0) > 3000 ? '正在加载人脸关键点…（第一次要下载约 15 MB，之后打开会快很多）' : '正在加载人脸关键点…');
   else if (S.lmStatus === 'failed') setPill('', lv && !lv.ok ? lv.hints.join(' · ') : '关键点没加载上，用虚线和残影对齐');
   else if (!face) setPill('bad', '没检测到人脸');
   else if (ev.perfect) setPill('ok', '✓ 完美，和基准一致');
