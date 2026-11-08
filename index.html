@@ -175,7 +175,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
-const APP_VERSION = '9';
+const APP_VERSION = '10';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -308,13 +308,17 @@ const FORMATS = {
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function startCamera(fmt) {
+  S.starting = (S.starting || 0) + 1; // while the stream is being swapped, a size change is expected, not a fault
+  try { return await openCamera(fmt); } finally { S.starting--; }
+}
+async function openCamera(fmt) {
   fmt = fmt || opt('camFormat', 'auto');
   if (!FORMATS[fmt]) fmt = 'auto';
   if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; await sleep(150); }
   try {
     S.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', frameRate: { ideal: 30 }, ...FORMATS[fmt].v } });
   } catch (e) {
-    if (fmt !== 'auto' && e && e.name !== 'NotAllowedError') { S.fmtFailed = fmt; return startCamera('auto'); }
+    if (fmt !== 'auto' && e && e.name !== 'NotAllowedError') { S.fmtFailed = fmt; return openCamera('auto'); }
     return camError(e);
   }
   S.fmt = fmt;
@@ -331,8 +335,26 @@ async function startCamera(fmt) {
     }
   } catch (_) {}
   S.vw = video.videoWidth; S.vh = video.videoHeight;
-  video.onresize = () => { if (video.videoWidth && (video.videoWidth !== S.vw || video.videoHeight !== S.vh)) { S.vw = video.videoWidth; S.vh = video.videoHeight; layoutStage(); renderAll(); } };
+  S.camW = S.vw; S.camH = S.vh;
   layoutStage(); renderAll();
+}
+// The camera can change its frame shape while the page stays open (e.g. iOS resuming the camera after the page
+// was in the background), and Safari does not always fire 'resize' on the video. A stale frame size scales the
+// eyes wrongly (a 4:3 -> 3:4 swap reads as the face being 33% bigger) and misplaces the dashed guide, so the real
+// size is checked every frame; if the shape no longer matches what was requested, the camera is reopened.
+function syncVideoSize(now) {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h || (w === S.vw && h === S.vh)) return;
+  S.vw = w; S.vh = h; S.face = null;
+  layoutStage(); renderAll();
+  if (S.camW && !S.starting && !sameAspect(w, h, S.camW, S.camH)) restartCamera(now, '摄像头画面变了，正在重新打开…');
+}
+function restartCamera(now, msg) {
+  if (S.restarting || S.starting || S.testing || S.busy || S.pending || S.countdown) return;
+  if (S.lastRestart && now - S.lastRestart < 5000) return; // never loop: at most one reopen every 5 s
+  S.restarting = true; S.lastRestart = now; S.face = null;
+  if (msg) setPill('warn', msg);
+  startCamera().finally(() => { S.restarting = false; });
 }
 function camInfo() {
   if (!S.vw) return `版本 ${APP_VERSION}`;
@@ -342,6 +364,7 @@ function camInfo() {
   if (landscape && portraitUI && target() === '9x16') t += ' · 手机竖着但画面是横的，9:16 只能用中间一条';
   if (!landscape && target() === '4x3') t += ' · 画面是竖的，4:3 只能用中间一段';
   if (S.settings.reference && !refValid()) t += ' · 画面格式和基准不同，下一张会成为新的基准';
+  else if (S.settings.reference) t += ` · 基准 ${S.settings.reference.date || '导入'}`;
   return t + ` · 版本 ${APP_VERSION}`;
 }
 function camError(e) {
@@ -664,6 +687,7 @@ function draw(now) {
   if (S.countdown || S.pending || S.testing) return;
   if (S.lmStatus === 'loading') setPill('', performance.now() - (S.lmStart || 0) > 3000 ? '正在加载人脸关键点…（第一次要下载约 15 MB，之后打开会快很多）' : '正在加载人脸关键点…');
   else if (S.lmStatus === 'failed') setPill('', lv && !lv.ok ? lv.hints.join(' · ') : '关键点没加载上，用虚线和残影对齐');
+  else if (S.settings.reference && !refValid() && S.history.length > 1) setPill('bad', '摄像头画面和基准横竖不一样，先关掉页面重新打开');
   else if (!face) setPill('bad', '没检测到人脸');
   else if (ev.perfect) setPill('ok', '✓ 完美，和基准一致');
   else if (ev.ok) setPill('ok', `可以拍 · 还能更准：${FINE[ev.top].label}${ev.items[ev.top].text === '✓' ? '' : ' ' + ev.items[ev.top].text}`);
@@ -674,7 +698,7 @@ function draw(now) {
     if (now - S.alignedSince > 800) { S.alignedSince = 0; onShoot(true); }
   } else S.alignedSince = 0;
 }
-function loop(now) { requestAnimationFrame(loop); detectLive(now); draw(now); }
+function loop(now) { requestAnimationFrame(loop); syncVideoSize(now); detectLive(now); draw(now); }
 
 // ------------------------------------------------------------------ sound
 let actx;
@@ -702,7 +726,8 @@ function cancelCountdown() { clearInterval(S.countdown); S.countdown = null; $('
 async function capture() {
   S.busy = true;
   try {
-    const W = S.vw, H = S.vh, c = document.createElement('canvas'); c.width = W; c.height = H;
+    syncVideoSize(performance.now());
+    const W = video.videoWidth || S.vw, H = video.videoHeight || S.vh, c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d');
     if (mirror()) { g.translate(W, 0); g.scale(-1, 1); }
     g.drawImage(video, 0, 0, W, H);
@@ -933,7 +958,14 @@ function bindUI() {
   $('#targetSel').onchange = e => { set('target', e.target.value); renderAll(); };
   $('#fmtSel').onchange = async e => { set('camFormat', e.target.value); await startCamera(e.target.value); renderAll(); if (S.fmt !== e.target.value) toast('这台手机不支持这种画面，已用默认'); };
   $('#refReset').onclick = () => { set('reference', undefined); delete S.settings.reference; store.set('settings', S.settings); toast('已恢复默认引导线'); $('#settingsDlg').close(); };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.stream && S.track && S.track.readyState === 'ended') startCamera(); renderAll(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { S.hiddenAt = performance.now(); return; }
+    // Back from the background: iOS may hand back the camera in another frame shape or zoom, so reopen it with
+    // the chosen format instead of trusting the old stream.
+    const away = S.hiddenAt ? performance.now() - S.hiddenAt : 0;
+    if (S.stream && S.track && (S.track.readyState === 'ended' || S.track.muted || away > 1500)) { S.lastRestart = 0; restartCamera(performance.now()); }
+    renderAll();
+  });
 }
 
 boot();
