@@ -86,6 +86,7 @@ ol li{margin:4px 0}
 
 <div id="stage">
   <video id="video" playsinline muted autoplay></video>
+  <canvas id="preview"></canvas>
   <img id="ghost" alt="">
   <canvas id="overlay"></canvas>
   <div id="lookHere">看镜头 ↑</div>
@@ -175,7 +176,7 @@ ol li{margin:4px 0}
 </dialog>
 
 <script type="module">
-const APP_VERSION = '10';
+const APP_VERSION = '12';
 const MP_VERSION = '0.10.35';
 const VENDOR = './vendor';
 const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
@@ -233,6 +234,7 @@ const store = (() => {
   const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction('kv', mode); const req = fn(t.objectStore('kv')); t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error); }); };
   return {
     get: k => tx('readonly', s => s.get(k)).catch(() => undefined),
+    getStrict: k => tx('readonly', s => s.get(k)),
     set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(e => console.warn('store', e)),
   };
 })();
@@ -245,8 +247,20 @@ const S = {
   level: null, levelOn: false, pending: null,
 };
 const video = $('#video'), overlay = $('#overlay'), octx = overlay.getContext('2d'), ghost = $('#ghost');
+// The picture on screen is drawn from the camera frames themselves. iOS sometimes shows the <video> shrunk to 75%
+// with black around it while the frames are full size (seen 2026-11-07: eye marks 1.33x too far apart on screen),
+// so drawing the frames keeps the picture, the dashed guide and the eye marks in the same place. The video stays
+// underneath: if drawing fails, it still shows.
+const preview = $('#preview'), pctx = preview.getContext('2d');
+function drawPreview() { if (video.readyState < 2 || !video.videoWidth || !preview.width) return; try { pctx.drawImage(video, 0, 0, preview.width, preview.height); } catch (_) {} }
 const opt = (k, d) => (S.settings[k] === undefined ? d : S.settings[k]);
-const set = (k, v) => { S.settings[k] = v; store.set('settings', S.settings); };
+// If the settings could not be read, writing them back would wipe the stored reference, so nothing is written.
+const set = (k, v) => {
+  S.settings[k] = v;
+  if (S.settingsUnread) return;
+  store.set('settings', S.settings);
+  if (k === 'reference') store.set('referenceBackup', v || null);
+};
 const mirror = () => opt('mirror', true);
 const today = () => ymd(new Date(Date.now() - opt('dayStartHour', 4) * 3600e3));
 const sameAspect = (w1, h1, w2, h2) => Math.abs(w1 / h1 - w2 / h2) < 0.02;
@@ -287,7 +301,17 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => { naviga
 
 // ------------------------------------------------------------------ boot
 async function boot() {
-  S.settings = (await store.get('settings')) || {};
+  for (let i = 0; i < 3; i++) {
+    try { S.settings = (await store.getStrict('settings')) || {}; S.settingsUnread = false; break; }
+    catch (e) { S.settingsUnread = true; await sleep(300); }
+  }
+  if (S.settingsUnread) { S.settings = {}; toast('没读到这台手机上的设置，这次先不保存设置。关掉页面重新打开试试', 6000); }
+  // The reference also lives in its own record; bring it back if the settings lost it (e.g. an earlier failed read).
+  if (!S.settingsUnread && !S.settings.reference) {
+    const bk = await store.get('referenceBackup');
+    if (bk && bk.eyes) { S.settings.reference = bk; store.set('settings', S.settings); toast(`已从备份恢复基准（${bk.date || '导入的照片'}）`, 4000); }
+  }
+  if (!S.settingsUnread && S.settings.reference && !(await store.get('referenceBackup'))) store.set('referenceBackup', S.settings.reference);
   S.history = (await store.get('history')) || [];
   S.ghostPrev = (await store.get('ghostPrev')) || null;
   S.ghostFirst = (await store.get('ghostFirst')) || null;
@@ -349,6 +373,36 @@ function syncVideoSize(now) {
   layoutStage(); renderAll();
   if (S.camW && !S.starting && !sameAspect(w, h, S.camW, S.camH)) restartCamera(now, '摄像头画面变了，正在重新打开…');
 }
+// iOS sometimes hands over frames of the usual size whose picture is shrunk into the middle with black bars
+// around it (seen 2026-11-07: picture at 75% with pure black on all four sides, frame still 1920x1440). The eyes
+// then measure too small and the dashed guide and the ghost no longer line up, until the camera is reopened.
+// Check the frame edges about once a second; two black-bar frames in a row reopen the camera.
+const BORDER = { w: 64, h: 48, band: 3, black: 10, lit: 28 };
+let borderCanvas;
+function frameHasBlackBars() {
+  if (!borderCanvas) { borderCanvas = document.createElement('canvas'); borderCanvas.width = BORDER.w; borderCanvas.height = BORDER.h; }
+  const { w, h, band } = BORDER, x = borderCanvas.getContext('2d', { willReadFrequently: true });
+  x.drawImage(video, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data, Y = i => 0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2];
+  const sideMax = (x0, x1, y0, y1) => { let m = 0; for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) m = Math.max(m, Y(yy * w + xx)); return m; };
+  let sum = 0, n = 0;
+  for (let yy = h / 4; yy < h * 3 / 4; yy++) for (let xx = w / 4; xx < w * 3 / 4; xx++) { sum += Y(yy * w + xx); n++; }
+  if (sum / n < BORDER.lit) return false; // a dark room is not a fault
+  const top = sideMax(0, w, 0, band), bottom = sideMax(0, w, h - band, h), left = sideMax(0, band, 0, h), right = sideMax(w - band, w, 0, h);
+  const k = BORDER.black;
+  return (top < k && bottom < k) || (left < k && right < k);
+}
+function checkBlackBars(now) {
+  if (now - (S.borderT || 0) < 900 || S.starting || S.restarting || video.readyState < 2) return;
+  S.borderT = now;
+  let bars = false; try { bars = frameHasBlackBars(); } catch (_) { return; }
+  if (!bars) { S.borderHits = 0; S.borderTries = 0; S.borderBad = false; return; }
+  S.borderHits = (S.borderHits || 0) + 1;
+  if (S.borderHits < 2) return;
+  if ((S.borderTries || 0) >= 2) { S.borderBad = true; return; } // reopening did not help: tell the user instead
+  S.borderTries = (S.borderTries || 0) + 1; S.borderHits = 0; S.lastRestart = 0;
+  restartCamera(now, '画面四周有黑边，正在重新打开摄像头…');
+}
 function restartCamera(now, msg) {
   if (S.restarting || S.starting || S.testing || S.busy || S.pending || S.countdown) return;
   if (S.lastRestart && now - S.lastRestart < 5000) return; // never loop: at most one reopen every 5 s
@@ -363,6 +417,7 @@ function camInfo() {
   try { const z = S.track.getSettings().zoom, c = S.track.getCapabilities ? S.track.getCapabilities().zoom : null; if (c) t += ` · 缩放 ${z ?? '-'}（${c.min}–${c.max}）`; } catch (_) {}
   if (landscape && portraitUI && target() === '9x16') t += ' · 手机竖着但画面是横的，9:16 只能用中间一条';
   if (!landscape && target() === '4x3') t += ' · 画面是竖的，4:3 只能用中间一段';
+  if (!S.settings.reference && S.history.length > 1) t += ' · 基准不在了：设置 › 从文件选第一天的照片恢复';
   if (S.settings.reference && !refValid()) t += ' · 画面格式和基准不同，下一张会成为新的基准';
   else if (S.settings.reference) t += ` · 基准 ${S.settings.reference.date || '导入'}`;
   return t + ` · 版本 ${APP_VERSION}`;
@@ -383,7 +438,8 @@ function layoutStage() {
   stage.style.width = Math.round(w) + 'px'; stage.style.height = Math.round(h) + 'px'; stage.style.margin = '0 auto';
   const dpr = window.devicePixelRatio || 1;
   overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr);
-  video.style.transform = mirror() ? 'scaleX(-1)' : 'none';
+  preview.width = overlay.width; preview.height = overlay.height;
+  video.style.transform = preview.style.transform = mirror() ? 'scaleX(-1)' : 'none';
 }
 window.addEventListener('resize', layoutStage);
 window.addEventListener('orientationchange', () => setTimeout(layoutStage, 300));
@@ -687,6 +743,7 @@ function draw(now) {
   if (S.countdown || S.pending || S.testing) return;
   if (S.lmStatus === 'loading') setPill('', performance.now() - (S.lmStart || 0) > 3000 ? '正在加载人脸关键点…（第一次要下载约 15 MB，之后打开会快很多）' : '正在加载人脸关键点…');
   else if (S.lmStatus === 'failed') setPill('', lv && !lv.ok ? lv.hints.join(' · ') : '关键点没加载上，用虚线和残影对齐');
+  else if (S.borderBad) setPill('bad', '画面四周有黑边，摄像头没开好：关掉页面重新打开');
   else if (S.settings.reference && !refValid() && S.history.length > 1) setPill('bad', '摄像头画面和基准横竖不一样，先关掉页面重新打开');
   else if (!face) setPill('bad', '没检测到人脸');
   else if (ev.perfect) setPill('ok', '✓ 完美，和基准一致');
@@ -698,7 +755,7 @@ function draw(now) {
     if (now - S.alignedSince > 800) { S.alignedSince = 0; onShoot(true); }
   } else S.alignedSince = 0;
 }
-function loop(now) { requestAnimationFrame(loop); syncVideoSize(now); detectLive(now); draw(now); }
+function loop(now) { requestAnimationFrame(loop); syncVideoSize(now); drawPreview(); checkBlackBars(now); detectLive(now); draw(now); }
 
 // ------------------------------------------------------------------ sound
 let actx;
@@ -957,7 +1014,7 @@ function bindUI() {
   $('#fovBtn').onclick = runFovTest; $('#fovBtn2').onclick = runFovTest;
   $('#targetSel').onchange = e => { set('target', e.target.value); renderAll(); };
   $('#fmtSel').onchange = async e => { set('camFormat', e.target.value); await startCamera(e.target.value); renderAll(); if (S.fmt !== e.target.value) toast('这台手机不支持这种画面，已用默认'); };
-  $('#refReset').onclick = () => { set('reference', undefined); delete S.settings.reference; store.set('settings', S.settings); toast('已恢复默认引导线'); $('#settingsDlg').close(); };
+  $('#refReset').onclick = () => { set('reference', undefined); delete S.settings.reference; store.set('settings', S.settings); store.set('referenceBackup', null); toast('已恢复默认引导线'); $('#settingsDlg').close(); };
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { S.hiddenAt = performance.now(); return; }
     // Back from the background: iOS may hand back the camera in another frame shape or zoom, so reopen it with

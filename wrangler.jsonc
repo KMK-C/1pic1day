@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "1pic1day",
+  "compatibility_date": "2026-11-04",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "."
+  }
+}

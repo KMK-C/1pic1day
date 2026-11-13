@@ -10,6 +10,10 @@ A small web page for a one-photo-a-day face timelapse, made for the iPhone front
 
 Photos never leave the device: the page has no server side and uploads nothing. The page, the face landmark runtime and the model are all served as static files from this repository.
 
+## Where it runs
+
+The live page is served by Cloudflare Workers at https://1pic1day.kamchen0629.workers.dev (static assets, config in `wrangler.jsonc`; deploy with `npx wrangler deploy`). This repository is the source backup.
+
 ## Third-party components
 
 `vendor/` contains MediaPipe Tasks Vision 0.10.35 (`vision_bundle.mjs`, `wasm/`) and the MediaPipe Face Landmarker model (`face_landmarker.task`), both by Google and distributed under the Apache License 2.0. See https://github.com/google-ai-edge/mediapipe and https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker.
